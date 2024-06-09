@@ -19,6 +19,28 @@ service = build('sheets', 'v4', credentials=creds)
 
 SPREADSHEET_ID = os.environ['SPREADSHEET_ID']
 
+# Function to preprocess the registrations collection based on cancelled meals
+def preprocess_cancelled_meals():
+    cancelled_meals_ref = db.collection('cancelled_meals')
+    cancelled_meals = cancelled_meals_ref.where('processed', '==', False).stream()
+
+    for cancelled_meal in cancelled_meals:
+        cancelled_data = cancelled_meal.to_dict()
+        date = cancelled_data.get('date')
+        mealTime = cancelled_data.get('mealTime')
+
+        registrations_ref = db.collection('registrations')
+        registrations = registrations_ref.where('date', '==', date)\
+                                         .where('mealTime', '==', mealTime)\
+                                         .stream()
+
+        for registration in registrations:
+            registration_ref = registration.reference
+            registration_ref.update({'cancelled': True})
+
+        cancelled_meal_ref = db.collection('cancelled_meals').document(cancelled_meal.id)
+        cancelled_meal_ref.update({'processed': True})
+
 # Function to fetch data and update Google Sheet
 def backup_firestore():
     users_ref = db.collection('users')
@@ -36,8 +58,8 @@ def backup_firestore():
         display_name = user_data.get('display_name')
         building_number = user_data.get('building_number')
 
-        lunch_count = registrations_ref.where('email', '==', email).where('mealTime', '==', 'lunch').where('month', '==', current_month).where('year', '==', current_year).stream()
-        dinner_count = registrations_ref.where('email', '==', email).where('mealTime', '==', 'dinner').where('month', '==', current_month).where('year', '==', current_year).stream()
+        lunch_count = registrations_ref.where('email', '==', email).where('mealTime', '==', 'lunch').where('month', '==', current_month).where('year', '==', current_year).where('cancelled', '==', False).stream()
+        dinner_count = registrations_ref.where('email', '==', email).where('mealTime', '==', 'dinner').where('month', '==', current_month).where('year', '==', current_year).where('cancelled', '==', False).stream()
         
         lunch_total = sum(1 for _ in lunch_count)
         dinner_total = sum(1 for _ in dinner_count)
@@ -72,4 +94,5 @@ def backup_firestore():
         valueInputOption='RAW', body=body).execute()
 
 if __name__ == '__main__':
+    preprocess_cancelled_meals()
     backup_firestore()
